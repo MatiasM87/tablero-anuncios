@@ -3,5 +3,6 @@ dist/
 server/data/
 server/uploads/
 *.log
+*.lock
 .env
 .DS_Store

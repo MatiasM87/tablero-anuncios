@@ -51,7 +51,19 @@ sudo docker compose restart
 - **Proxy inverso**: nginx, config en `/etc/nginx/sites-available/tablero.congregacion.com.ar`
 - **SSL**: certificado Let's Encrypt vía certbot, con renovación automática ya configurada (`certbot renew` corre por systemd timer)
 
-### Actualizar la app en el servidor
+### Auto-deploy desde git
+
+El script `autodeploy.sh` corre cada 5 minutos vía cron y despliega automáticamente cuando hay nuevos commits en `origin/main`: detiene el contenedor, sincroniza el código y lo vuelve a levantar (rebuild incluido). Usa un lock (`flock`) para evitar que se solapen dos ejecuciones si un deploy tarda más de 5 minutos.
+
+```bash
+# Ver log de deploys
+tail -f /home/matias/tablero-anuncios/autodeploy.log
+
+# Ejecutar deploy manual
+bash /home/matias/tablero-anuncios/autodeploy.sh
+```
+
+### Actualizar la app en el servidor (manual)
 
 ```bash
 cd /home/matias/tablero-anuncios
