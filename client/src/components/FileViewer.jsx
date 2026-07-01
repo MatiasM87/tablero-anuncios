@@ -8,6 +8,7 @@ const pdfCache = {};
 
 function PdfViewer({ url, page, onTotalPages }) {
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
   const [error, setError] = useState(null);
   const pdfRef = useRef(null);
 
@@ -24,11 +25,13 @@ function PdfViewer({ url, page, onTotalPages }) {
 
       const pdfPage = await pdf.getPage(page);
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
 
+      const { width: cw, height: ch } = container.getBoundingClientRect();
       const viewport = pdfPage.getViewport({ scale: 1 });
-      const scaleX = (window.innerWidth * 0.98) / viewport.width;
-      const scaleY = (window.innerHeight * 0.92) / viewport.height;
+      const scaleX = (cw * 0.98) / viewport.width;
+      const scaleY = (ch * 0.92) / viewport.height;
       const scale = Math.min(scaleX, scaleY);
 
       const scaledVp = pdfPage.getViewport({ scale });
@@ -48,6 +51,14 @@ function PdfViewer({ url, page, onTotalPages }) {
     loadAndRender();
   }, [loadAndRender]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => loadAndRender());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [loadAndRender]);
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center w-full h-full text-white gap-4">
@@ -59,7 +70,7 @@ function PdfViewer({ url, page, onTotalPages }) {
   }
 
   return (
-    <div className="flex items-center justify-center w-full h-full bg-gray-900">
+    <div ref={containerRef} className="flex items-center justify-center w-full h-full bg-gray-900">
       <canvas ref={canvasRef} className="shadow-2xl" />
     </div>
   );

@@ -20,14 +20,31 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DEFAULT_DB = {
   items: [],
   settings: { autoAdvance: true, defaultDuration: 10 },
+  layout: { template: 'single' },
+  zoneAssignments: [],
+};
+
+// Maps each layout template to its valid zone ids (used to validate assignments)
+const LAYOUT_TEMPLATES = {
+  single: ['a'],
+  'split-2v': ['a', 'b'],
+  'split-2h': ['a', 'b'],
+  'split-3-left': ['a', 'b', 'c'],
+  'split-3-top': ['a', 'b', 'c'],
+  'grid-4': ['a', 'b', 'c', 'd'],
 };
 
 function getDB() {
+  let db;
   try {
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   } catch {
-    return structuredClone(DEFAULT_DB);
+    db = structuredClone(DEFAULT_DB);
   }
+  // Backfill fields for databases created before multi-zone layouts existed
+  if (!db.layout) db.layout = structuredClone(DEFAULT_DB.layout);
+  if (!db.zoneAssignments) db.zoneAssignments = [];
+  return db;
 }
 
 function saveDB(db) {
@@ -218,6 +235,7 @@ app.delete('/api/items/:id', (req, res) => {
   }
 
   db.items = db.items.filter(i => i.id !== req.params.id);
+  db.zoneAssignments = db.zoneAssignments.filter(a => a.itemId !== req.params.id);
   saveDB(db);
   res.json({ ok: true });
 });
@@ -234,6 +252,44 @@ app.put('/api/settings', (req, res) => {
   db.settings = { ...db.settings, ...req.body };
   saveDB(db);
   res.json(db.settings);
+});
+
+// GET /api/layout — current template + per-zone document assignments
+app.get('/api/layout', (req, res) => {
+  const db = getDB();
+  res.json({ template: db.layout.template, zoneAssignments: db.zoneAssignments });
+});
+
+// PUT /api/layout — replace template and/or zone assignments
+app.put('/api/layout', (req, res) => {
+  const { template, zoneAssignments } = req.body;
+  const db = getDB();
+
+  if (template !== undefined) {
+    if (!LAYOUT_TEMPLATES[template]) {
+      return res.status(400).json({ error: 'Plantilla de layout inválida' });
+    }
+    db.layout.template = template;
+  }
+
+  if (zoneAssignments !== undefined) {
+    if (!Array.isArray(zoneAssignments)) {
+      return res.status(400).json({ error: 'zoneAssignments debe ser un array' });
+    }
+    const validZoneIds = LAYOUT_TEMPLATES[db.layout.template];
+    const itemIds = new Set(db.items.map(i => i.id));
+    const cleaned = zoneAssignments.filter(a => validZoneIds.includes(a.zoneId) && itemIds.has(a.itemId));
+    db.zoneAssignments = cleaned.map((a, index) => ({
+      id: a.id || uuidv4(),
+      zoneId: a.zoneId,
+      itemId: a.itemId,
+      order: index,
+      duration: a.duration ? Math.max(1, parseInt(a.duration)) : null,
+    }));
+  }
+
+  saveDB(db);
+  res.json({ template: db.layout.template, zoneAssignments: db.zoneAssignments });
 });
 
 // Serve React app in production
