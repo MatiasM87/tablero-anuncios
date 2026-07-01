@@ -51,3 +51,12 @@ export const updateSettings = (data) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+
+export const fetchLayout = () => request('/layout');
+
+export const updateLayout = (data) =>
+  request('/layout', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
