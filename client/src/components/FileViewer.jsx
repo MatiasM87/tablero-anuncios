@@ -11,8 +11,9 @@ function PdfViewer({ url, page, onTotalPages }) {
   const containerRef = useRef(null);
   const [error, setError] = useState(null);
   const pdfRef = useRef(null);
+  const renderTaskRef = useRef(null);
 
-  const loadAndRender = useCallback(async () => {
+  const loadAndRender = useCallback(async (cancelledRef) => {
     try {
       setError(null);
       let pdf = pdfRef.current || pdfCache[url];
@@ -21,9 +22,11 @@ function PdfViewer({ url, page, onTotalPages }) {
         pdfCache[url] = pdf;
         pdfRef.current = pdf;
       }
+      if (cancelledRef?.current) return;
       onTotalPages?.(pdf.numPages);
 
       const pdfPage = await pdf.getPage(page);
+      if (cancelledRef?.current) return;
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) return;
@@ -35,20 +38,41 @@ function PdfViewer({ url, page, onTotalPages }) {
       const scale = Math.min(scaleX, scaleY);
 
       const scaledVp = pdfPage.getViewport({ scale });
+
+      // Cancel any in-flight render before touching the canvas again —
+      // pdf.js throws if two render() calls target the same canvas concurrently
+      // (page changes and ResizeObserver firings can otherwise overlap).
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
+      }
+
       canvas.width = scaledVp.width;
       canvas.height = scaledVp.height;
 
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      await pdfPage.render({ canvasContext: ctx, viewport: scaledVp }).promise;
+      const task = pdfPage.render({ canvasContext: ctx, viewport: scaledVp });
+      renderTaskRef.current = task;
+      await task.promise;
+      if (renderTaskRef.current === task) renderTaskRef.current = null;
     } catch (err) {
+      if (err?.name === 'RenderingCancelledException' || cancelledRef?.current) return;
       console.error('PDF error:', err);
       setError(err.message);
     }
   }, [url, page, onTotalPages]);
 
   useEffect(() => {
-    loadAndRender();
+    const cancelledRef = { current: false };
+    loadAndRender(cancelledRef);
+    return () => {
+      cancelledRef.current = true;
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
+      }
+    };
   }, [loadAndRender]);
 
   useEffect(() => {
