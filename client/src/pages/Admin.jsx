@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Plus, Settings, Monitor, Pin, Clock, RefreshCw, ChevronDown, ChevronUp, LayoutGrid } from 'lucide-react';
+import { Plus, Settings, Monitor, Pin, Clock, RefreshCw, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 import { fetchItems, fetchSettings, updateSettings, reorderItems } from '../utils/api.js';
 import ItemCard from '../components/ItemCard.jsx';
 import UploadModal from '../components/UploadModal.jsx';
@@ -180,7 +180,7 @@ export default function Admin() {
               href="/admin/layout"
               className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
             >
-              <LayoutGrid size={16} /> Distribución
+              <Layers size={16} /> Páginas
             </a>
             <a
               href="/"

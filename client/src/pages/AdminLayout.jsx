@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { GripVertical, Trash2, Monitor, ArrowLeft, LayoutGrid } from 'lucide-react';
-import { fetchItems, fetchLayout, updateLayout } from '../utils/api.js';
+import { GripVertical, Trash2, Monitor, ArrowLeft, Layers, Plus, CheckCircle2 } from 'lucide-react';
+import { fetchItems, fetchPages, updatePages } from '../utils/api.js';
 import { LAYOUT_TEMPLATES, getTemplate } from '../constants/layouts.js';
 
 function MiniPreview({ template }) {
   const cellIds = new Set(template.gridTemplateAreas.match(/[a-z]/g));
   return (
     <div
-      className="grid gap-0.5 w-16 h-11 rounded overflow-hidden bg-gray-300"
+      className="grid gap-0.5 w-16 h-11 rounded overflow-hidden bg-gray-300 flex-shrink-0"
       style={{
         gridTemplateColumns: template.gridTemplateColumns,
         gridTemplateRows: template.gridTemplateRows,
@@ -135,73 +135,163 @@ function ZonePanel({ zone, assignments, allItems, onAdd, onRemove, onDurationCha
   );
 }
 
+function PageListItem({ page, index, selected, onSelect, onRemove, canRemove, dragHandle }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const template = getTemplate(page.template);
+
+  const handleRemoveClick = (e) => {
+    e.stopPropagation();
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
+    }
+    onRemove(page.id);
+  };
+
+  return (
+    <div
+      onClick={() => onSelect(page.id)}
+      className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+        selected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-300' : 'border-gray-200 bg-white hover:border-gray-300'
+      }`}
+    >
+      <div {...dragHandle} className="text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing flex-shrink-0">
+        <GripVertical size={18} />
+      </div>
+      <MiniPreview template={template} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-gray-800 truncate">{page.name}</p>
+        <p className="text-xs text-gray-400">{template.label}</p>
+      </div>
+      {canRemove && (
+        <button
+          onClick={handleRemoveClick}
+          title={confirmDelete ? 'Click de nuevo para confirmar' : 'Eliminar página'}
+          className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
+            confirmDelete ? 'text-white bg-red-500 hover:bg-red-600' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
+          }`}
+        >
+          {confirmDelete ? <CheckCircle2 size={16} /> : <Trash2 size={16} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function AdminLayout() {
   const [items, setItems] = useState([]);
-  const [templateId, setTemplateId] = useState('single');
-  const [assignmentsByZone, setAssignmentsByZone] = useState({});
+  const [pages, setPages] = useState([]);
+  const [selectedPageId, setSelectedPageId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [rawItems, layout] = await Promise.all([fetchItems(), fetchLayout()]);
+      const [rawItems, rawPages] = await Promise.all([fetchItems(), fetchPages()]);
       setItems(rawItems);
-      setTemplateId(layout.template);
-
-      const grouped = {};
-      [...layout.zoneAssignments].sort((a, b) => a.order - b.order).forEach(a => {
-        grouped[a.zoneId] = grouped[a.zoneId] || [];
-        grouped[a.zoneId].push(a);
-      });
-      setAssignmentsByZone(grouped);
+      setPages(rawPages);
+      setSelectedPageId(rawPages[0]?.id ?? null);
       setLoading(false);
     })();
   }, []);
 
-  const template = getTemplate(templateId);
+  const selectedPage = pages.find(p => p.id === selectedPageId) || null;
 
-  const handleAdd = (zoneId, itemId) => {
-    setAssignmentsByZone(prev => {
-      const list = prev[zoneId] || [];
-      const newAssignment = { id: crypto.randomUUID(), zoneId, itemId, duration: null };
-      return { ...prev, [zoneId]: [...list, newAssignment] };
+  const groupByZone = (zoneAssignments) => {
+    const grouped = {};
+    [...zoneAssignments].sort((a, b) => a.order - b.order).forEach(a => {
+      grouped[a.zoneId] = grouped[a.zoneId] || [];
+      grouped[a.zoneId].push(a);
+    });
+    return grouped;
+  };
+
+  const patchSelectedPage = (updater) => {
+    setPages(prev => prev.map(p => (p.id === selectedPageId ? updater(p) : p)));
+    setSaved(false);
+  };
+
+  const handleAddPage = () => {
+    const newPage = {
+      id: crypto.randomUUID(),
+      name: `Página ${pages.length + 1}`,
+      template: 'single',
+      zoneAssignments: [],
+    };
+    setPages(prev => [...prev, newPage]);
+    setSelectedPageId(newPage.id);
+    setSaved(false);
+  };
+
+  const handleRemovePage = (id) => {
+    if (pages.length <= 1) return;
+    setPages(prev => {
+      const next = prev.filter(p => p.id !== id);
+      if (selectedPageId === id) setSelectedPageId(next[0]?.id ?? null);
+      return next;
     });
     setSaved(false);
   };
 
-  const handleRemove = (zoneId, assignmentId) => {
-    setAssignmentsByZone(prev => ({
-      ...prev,
-      [zoneId]: (prev[zoneId] || []).filter(a => a.id !== assignmentId),
-    }));
+  const handleReorderPages = (result) => {
+    if (!result.destination) return;
+    setPages(prev => {
+      const next = Array.from(prev);
+      const [moved] = next.splice(result.source.index, 1);
+      next.splice(result.destination.index, 0, moved);
+      return next;
+    });
     setSaved(false);
+  };
+
+  const handleNameChange = (name) => {
+    patchSelectedPage(p => ({ ...p, name }));
+  };
+
+  const handleTemplateChange = (templateId) => {
+    patchSelectedPage(p => ({ ...p, template: templateId }));
+  };
+
+  const handleAddAssignment = (zoneId, itemId) => {
+    patchSelectedPage(p => ({
+      ...p,
+      zoneAssignments: [...p.zoneAssignments, { id: crypto.randomUUID(), zoneId, itemId, duration: null }],
+    }));
+  };
+
+  const handleRemoveAssignment = (zoneId, assignmentId) => {
+    patchSelectedPage(p => ({
+      ...p,
+      zoneAssignments: p.zoneAssignments.filter(a => a.id !== assignmentId),
+    }));
   };
 
   const handleDurationChange = (zoneId, assignmentId, value) => {
     const duration = value === '' ? null : Math.max(1, Number(value));
-    setAssignmentsByZone(prev => ({
-      ...prev,
-      [zoneId]: (prev[zoneId] || []).map(a => (a.id === assignmentId ? { ...a, duration } : a)),
+    patchSelectedPage(p => ({
+      ...p,
+      zoneAssignments: p.zoneAssignments.map(a => (a.id === assignmentId ? { ...a, duration } : a)),
     }));
-    setSaved(false);
   };
 
   const handleZoneDragEnd = (zoneId, result) => {
     if (!result.destination) return;
-    setAssignmentsByZone(prev => {
-      const list = Array.from(prev[zoneId] || []);
-      const [moved] = list.splice(result.source.index, 1);
-      list.splice(result.destination.index, 0, moved);
-      return { ...prev, [zoneId]: list };
+    patchSelectedPage(p => {
+      const zoneItems = p.zoneAssignments.filter(a => a.zoneId === zoneId).sort((a, b) => a.order - b.order);
+      const others = p.zoneAssignments.filter(a => a.zoneId !== zoneId);
+      const [moved] = zoneItems.splice(result.source.index, 1);
+      zoneItems.splice(result.destination.index, 0, moved);
+      const reindexed = zoneItems.map((a, idx) => ({ ...a, order: idx }));
+      return { ...p, zoneAssignments: [...others, ...reindexed] };
     });
-    setSaved(false);
   };
 
   const handleSave = async () => {
     setSaving(true);
-    const zoneAssignments = template.zones.flatMap(zone => assignmentsByZone[zone.id] || []);
-    await updateLayout({ template: templateId, zoneAssignments });
+    const savedPages = await updatePages(pages);
+    setPages(savedPages);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -215,18 +305,21 @@ export default function AdminLayout() {
     );
   }
 
+  const template = selectedPage ? getTemplate(selectedPage.template) : null;
+  const assignmentsByZone = selectedPage ? groupByZone(selectedPage.zoneAssignments) : {};
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <a href="/admin" className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
               <ArrowLeft size={18} />
             </a>
-            <LayoutGrid size={20} className="text-gray-400" />
+            <Layers size={20} className="text-gray-400" />
             <div>
-              <h1 className="text-xl font-bold text-gray-900">Distribución de pantalla</h1>
-              <p className="text-xs text-gray-400">Elegí cuántas zonas mostrar y qué documentos van en cada una</p>
+              <h1 className="text-xl font-bold text-gray-900">Páginas</h1>
+              <p className="text-xs text-gray-400">El tablero pasa de una página a la siguiente cuando todas sus zonas terminan de mostrar sus documentos</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -249,29 +342,86 @@ export default function AdminLayout() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Plantilla</h2>
-        <TemplatePicker value={templateId} onChange={(id) => { setTemplateId(id); setSaved(false); }} />
+      <main className="max-w-5xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8">
+        {/* Page list */}
+        <div>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            Páginas ({pages.length})
+          </h2>
+          <DragDropContext onDragEnd={handleReorderPages}>
+            <Droppable droppableId="pages-list">
+              {(provided) => (
+                <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
+                  {pages.map((page, index) => (
+                    <Draggable key={page.id} draggableId={page.id} index={index}>
+                      {(dragProvided) => (
+                        <div ref={dragProvided.innerRef} {...dragProvided.draggableProps}>
+                          <PageListItem
+                            page={page}
+                            index={index}
+                            selected={page.id === selectedPageId}
+                            onSelect={setSelectedPageId}
+                            onRemove={handleRemovePage}
+                            canRemove={pages.length > 1}
+                            dragHandle={dragProvided.dragHandleProps}
+                          />
+                        </div>
+                      )}
+                    </Draggable>
+                  ))}
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          </DragDropContext>
 
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Contenido por zona</h2>
-        {items.length === 0 ? (
-          <p className="text-gray-400 text-sm">
-            Todavía no hay documentos subidos. <a href="/admin" className="text-blue-600 underline">Agregá contenido primero</a>.
-          </p>
-        ) : (
-          template.zones.map(zone => (
-            <ZonePanel
-              key={zone.id}
-              zone={zone}
-              assignments={assignmentsByZone[zone.id] || []}
-              allItems={items}
-              onAdd={handleAdd}
-              onRemove={handleRemove}
-              onDurationChange={handleDurationChange}
-              onDragEnd={handleZoneDragEnd}
-            />
-          ))
-        )}
+          <button
+            onClick={handleAddPage}
+            className="mt-3 w-full py-2.5 border-2 border-dashed border-gray-300 rounded-xl text-gray-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition-all text-sm font-medium flex items-center justify-center gap-2"
+          >
+            <Plus size={16} /> Agregar página
+          </button>
+        </div>
+
+        {/* Selected page editor */}
+        <div>
+          {!selectedPage ? (
+            <p className="text-gray-400 text-sm">Elegí o creá una página para editarla.</p>
+          ) : (
+            <>
+              <input
+                type="text"
+                value={selectedPage.name}
+                onChange={(e) => handleNameChange(e.target.value)}
+                className="text-lg font-semibold text-gray-800 border-b border-transparent hover:border-gray-200 focus:border-blue-400 focus:outline-none mb-6 px-1 py-1 w-full"
+                placeholder="Nombre de la página"
+              />
+
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Plantilla</h3>
+              <TemplatePicker value={selectedPage.template} onChange={handleTemplateChange} />
+
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Contenido por zona</h3>
+              {items.length === 0 ? (
+                <p className="text-gray-400 text-sm">
+                  Todavía no hay documentos subidos. <a href="/admin" className="text-blue-600 underline">Agregá contenido primero</a>.
+                </p>
+              ) : (
+                template.zones.map(zone => (
+                  <ZonePanel
+                    key={zone.id}
+                    zone={zone}
+                    assignments={assignmentsByZone[zone.id] || []}
+                    allItems={items}
+                    onAdd={handleAddAssignment}
+                    onRemove={handleRemoveAssignment}
+                    onDurationChange={handleDurationChange}
+                    onDragEnd={handleZoneDragEnd}
+                  />
+                ))
+              )}
+            </>
+          )}
+        </div>
       </main>
     </div>
   );
