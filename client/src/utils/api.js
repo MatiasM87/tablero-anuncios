@@ -52,11 +52,11 @@ export const updateSettings = (data) =>
     body: JSON.stringify(data),
   });
 
-export const fetchLayout = () => request('/layout');
+export const fetchPages = () => request('/pages');
 
-export const updateLayout = (data) =>
-  request('/layout', {
+export const updatePages = (pages) =>
+  request('/pages', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+    body: JSON.stringify({ pages }),
   });

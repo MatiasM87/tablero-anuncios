@@ -20,7 +20,10 @@ function Dots({ total, current }) {
 
 // Plays through an ordered list of { item, duration } entries on a loop,
 // advancing pages within multi-page documents before moving to the next entry.
-export default function Zone({ slides, autoAdvance, label }) {
+// Reports onCycleComplete() the instant it wraps back to the first entry —
+// the parent page uses that to know this zone finished showing everything
+// at least once, without caring how long that took.
+export default function Zone({ slides, autoAdvance, label, onCycleComplete }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -32,12 +35,14 @@ export default function Zone({ slides, autoAdvance, label }) {
   const currentPageRef = useRef(1);
   const totalPagesRef = useRef(1);
   const autoAdvanceRef = useRef(true);
+  const onCycleCompleteRef = useRef(onCycleComplete);
 
   slidesRef.current = slides;
   currentIndexRef.current = currentIndex;
   currentPageRef.current = currentPage;
   totalPagesRef.current = totalPages;
   autoAdvanceRef.current = autoAdvance;
+  onCycleCompleteRef.current = onCycleComplete;
 
   // Keep the current slide in range if the assigned list shrinks
   useEffect(() => {
@@ -47,6 +52,12 @@ export default function Zone({ slides, autoAdvance, label }) {
       setTotalPages(1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slides.length]);
+
+  // An empty zone has nothing to lap through — signal completion right away
+  // so it never holds up the page it belongs to.
+  useEffect(() => {
+    if (slides.length === 0) onCycleCompleteRef.current?.();
   }, [slides.length]);
 
   const advance = useCallback(() => {
@@ -69,6 +80,7 @@ export default function Zone({ slides, autoAdvance, label }) {
         currentPageRef.current = next;
       } else {
         const nextIdx = (idx + 1) % list.length;
+        if (nextIdx === 0) onCycleCompleteRef.current?.();
         setCurrentIndex(nextIdx);
         currentIndexRef.current = nextIdx;
         setCurrentPage(1);

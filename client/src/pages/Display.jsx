@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import Zone from '../components/Zone.jsx';
-import { fetchItems, fetchSettings, fetchLayout } from '../utils/api.js';
-import { getTemplate } from '../constants/layouts.js';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import PageStage from '../components/PageStage.jsx';
+import { fetchItems, fetchSettings, fetchPages } from '../utils/api.js';
 
 function Clock() {
   const [time, setTime] = useState('');
@@ -17,57 +16,24 @@ function Clock() {
   return <span className="text-white/70 text-sm font-mono tabular-nums">{time}</span>;
 }
 
-const sortByPinnedThenOrder = (raw) => {
-  return [...raw].sort((a, b) => {
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-    return a.order - b.order;
-  });
-};
-
-// Resolves each zone's ordered slide list ({ item, duration }) from the
-// assignment table. Falls back to the full playlist in zone "a" when no
-// assignments exist yet (keeps pre-existing single-screen boards working).
-function buildZoneSlides(templateId, items, zoneAssignments) {
-  const template = getTemplate(templateId);
-  const itemsById = Object.fromEntries(items.map(i => [i.id, i]));
-
-  if (zoneAssignments.length === 0 && templateId === 'single') {
-    const slides = sortByPinnedThenOrder(items).map(item => ({ item, duration: item.duration }));
-    return { a: slides };
-  }
-
-  const result = {};
-  for (const zone of template.zones) {
-    const forZone = zoneAssignments
-      .filter(a => a.zoneId === zone.id)
-      .sort((a, b) => a.order - b.order)
-      .map(a => {
-        const item = itemsById[a.itemId];
-        if (!item) return null;
-        return { item, duration: a.duration || item.duration };
-      })
-      .filter(Boolean);
-    result[zone.id] = forZone;
-  }
-  return result;
-}
-
 export default function Display() {
   const [items, setItems] = useState([]);
   const [settings, setSettings] = useState({ autoAdvance: true });
-  const [templateId, setTemplateId] = useState('single');
-  const [zoneAssignments, setZoneAssignments] = useState([]);
+  const [pages, setPages] = useState([]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [visit, setVisit] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const pagesRef = useRef([]);
+  pagesRef.current = pages;
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [rawItems, cfg, layout] = await Promise.all([fetchItems(), fetchSettings(), fetchLayout()]);
+        const [rawItems, cfg, rawPages] = await Promise.all([fetchItems(), fetchSettings(), fetchPages()]);
         setItems(rawItems);
         setSettings(cfg);
-        setTemplateId(layout.template);
-        setZoneAssignments(layout.zoneAssignments);
+        setPages(rawPages);
         setLoading(false);
       } catch (err) {
         console.error('Error cargando datos:', err);
@@ -77,6 +43,21 @@ export default function Display() {
     load();
     const id = setInterval(load, 30_000);
     return () => clearInterval(id);
+  }, []);
+
+  // Keep the current page in range if the page list shrinks server-side
+  useEffect(() => {
+    if (pageIndex >= pages.length && pages.length > 0) setPageIndex(0);
+  }, [pages.length, pageIndex]);
+
+  // Called once every zone on the current page has shown its whole queue at
+  // least once. With a single page there's nowhere to advance to, so it just
+  // keeps looping in place exactly like a single-screen board always has.
+  const handlePageComplete = useCallback(() => {
+    const total = pagesRef.current.length;
+    if (total <= 1) return;
+    setPageIndex(i => (i + 1) % total);
+    setVisit(v => v + 1);
   }, []);
 
   if (loading) {
@@ -106,25 +87,21 @@ export default function Display() {
     );
   }
 
-  const template = getTemplate(templateId);
-  const zoneSlides = buildZoneSlides(templateId, items, zoneAssignments);
+  const page = pages[pageIndex];
+  if (!page) return null;
 
   return (
     <div className="w-screen h-screen bg-black overflow-hidden relative select-none">
-      <div
-        className="w-full h-full grid gap-0.5 bg-gray-800"
-        style={{
-          gridTemplateColumns: template.gridTemplateColumns,
-          gridTemplateRows: template.gridTemplateRows,
-          gridTemplateAreas: template.gridTemplateAreas,
-        }}
-      >
-        {template.zones.map(zone => (
-          <div key={zone.id} style={{ gridArea: zone.id }} className="min-w-0 min-h-0">
-            <Zone slides={zoneSlides[zone.id] || []} autoAdvance={settings.autoAdvance} label={zone.label} />
-          </div>
-        ))}
-      </div>
+      {/* Keyed by page id + visit count: only remounts (resetting every zone
+          back to its first document) when we deliberately move to another
+          page, never on the 30s background data refresh. */}
+      <PageStage
+        key={`${page.id}-${visit}`}
+        page={page}
+        items={items}
+        autoAdvance={settings.autoAdvance}
+        onPageComplete={handlePageComplete}
+      />
 
       {/* Global clock overlay */}
       <div className="absolute top-3 left-3 z-20 bg-black/40 rounded-lg px-3 py-1.5">

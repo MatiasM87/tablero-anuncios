@@ -20,8 +20,9 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 const DEFAULT_DB = {
   items: [],
   settings: { autoAdvance: true, defaultDuration: 10 },
-  layout: { template: 'single' },
-  zoneAssignments: [],
+  pages: [
+    { id: 'page-1', name: 'Página 1', template: 'single', zoneAssignments: [] },
+  ],
 };
 
 // Maps each layout template to its valid zone ids (used to validate assignments)
@@ -42,9 +43,19 @@ function getDB() {
   } catch {
     db = structuredClone(DEFAULT_DB);
   }
-  // Backfill fields for databases created before multi-zone layouts existed
-  if (!db.layout) db.layout = structuredClone(DEFAULT_DB.layout);
-  if (!db.zoneAssignments) db.zoneAssignments = [];
+  // Migrate pre-multi-page databases: the single template + zoneAssignments
+  // they had becomes the one and only page.
+  if (!db.pages) {
+    db.pages = [{
+      id: uuidv4(),
+      name: 'Página 1',
+      template: db.layout?.template || 'single',
+      zoneAssignments: db.zoneAssignments || [],
+    }];
+    delete db.layout;
+    delete db.zoneAssignments;
+    saveDB(db);
+  }
   return db;
 }
 
@@ -236,7 +247,10 @@ app.delete('/api/items/:id', (req, res) => {
   }
 
   db.items = db.items.filter(i => i.id !== req.params.id);
-  db.zoneAssignments = db.zoneAssignments.filter(a => a.itemId !== req.params.id);
+  db.pages = db.pages.map(p => ({
+    ...p,
+    zoneAssignments: p.zoneAssignments.filter(a => a.itemId !== req.params.id),
+  }));
   saveDB(db);
   res.json({ ok: true });
 });
@@ -255,42 +269,48 @@ app.put('/api/settings', (req, res) => {
   res.json(db.settings);
 });
 
-// GET /api/layout — current template + per-zone document assignments
-app.get('/api/layout', (req, res) => {
+// GET /api/pages — ordered list of pages the board cycles through; each page
+// has its own layout template and per-zone document assignments
+app.get('/api/pages', (req, res) => {
   const db = getDB();
-  res.json({ template: db.layout.template, zoneAssignments: db.zoneAssignments });
+  res.json(db.pages);
 });
 
-// PUT /api/layout — replace template and/or zone assignments
-app.put('/api/layout', (req, res) => {
-  const { template, zoneAssignments } = req.body;
+// PUT /api/pages — replace the full page list (add/remove/reorder/edit)
+app.put('/api/pages', (req, res) => {
+  const { pages } = req.body;
+  if (!Array.isArray(pages) || pages.length === 0) {
+    return res.status(400).json({ error: 'pages debe ser un array con al menos una página' });
+  }
+
   const db = getDB();
+  const itemIds = new Set(db.items.map(i => i.id));
 
-  if (template !== undefined) {
-    if (!LAYOUT_TEMPLATES[template]) {
-      return res.status(400).json({ error: 'Plantilla de layout inválida' });
-    }
-    db.layout.template = template;
-  }
+  db.pages = pages.map((page, pageIndex) => {
+    const template = LAYOUT_TEMPLATES[page.template] ? page.template : 'single';
+    const validZoneIds = LAYOUT_TEMPLATES[template];
+    const zoneAssignments = Array.isArray(page.zoneAssignments)
+      ? page.zoneAssignments
+          .filter(a => validZoneIds.includes(a.zoneId) && itemIds.has(a.itemId))
+          .map((a, index) => ({
+            id: a.id || uuidv4(),
+            zoneId: a.zoneId,
+            itemId: a.itemId,
+            order: index,
+            duration: a.duration ? Math.max(1, parseInt(a.duration)) : null,
+          }))
+      : [];
 
-  if (zoneAssignments !== undefined) {
-    if (!Array.isArray(zoneAssignments)) {
-      return res.status(400).json({ error: 'zoneAssignments debe ser un array' });
-    }
-    const validZoneIds = LAYOUT_TEMPLATES[db.layout.template];
-    const itemIds = new Set(db.items.map(i => i.id));
-    const cleaned = zoneAssignments.filter(a => validZoneIds.includes(a.zoneId) && itemIds.has(a.itemId));
-    db.zoneAssignments = cleaned.map((a, index) => ({
-      id: a.id || uuidv4(),
-      zoneId: a.zoneId,
-      itemId: a.itemId,
-      order: index,
-      duration: a.duration ? Math.max(1, parseInt(a.duration)) : null,
-    }));
-  }
+    return {
+      id: page.id || uuidv4(),
+      name: (page.name || '').trim() || `Página ${pageIndex + 1}`,
+      template,
+      zoneAssignments,
+    };
+  });
 
   saveDB(db);
-  res.json({ template: db.layout.template, zoneAssignments: db.zoneAssignments });
+  res.json(db.pages);
 });
 
 // Serve React app in production
