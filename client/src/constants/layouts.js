@@ -55,6 +55,18 @@ export const LAYOUT_TEMPLATES = {
       { id: 'c', label: 'Zona vertical 2' },
     ],
   },
+  'split-3v': {
+    label: '3 zonas verticales',
+    description: '3 columnas iguales, lado a lado',
+    gridTemplateColumns: '1fr 1fr 1fr',
+    gridTemplateRows: '1fr',
+    gridTemplateAreas: '"a b c"',
+    zones: [
+      { id: 'a', label: 'Zona izquierda' },
+      { id: 'b', label: 'Zona central' },
+      { id: 'c', label: 'Zona derecha' },
+    ],
+  },
   'grid-4': {
     label: '4 zonas',
     description: 'Grilla 2x2',

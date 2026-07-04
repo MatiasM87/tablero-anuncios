@@ -31,6 +31,7 @@ const LAYOUT_TEMPLATES = {
   'split-2h': ['a', 'b'],
   'split-3-left': ['a', 'b', 'c'],
   'split-3-top': ['a', 'b', 'c'],
+  'split-3v': ['a', 'b', 'c'],
   'grid-4': ['a', 'b', 'c', 'd'],
 };
 

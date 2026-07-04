@@ -4,6 +4,8 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+// Keyed by url, stores the in-flight/resolved load promise (not the document
+// itself) so concurrent viewers of the same PDF never trigger two loads.
 const pdfCache = {};
 
 function PdfViewer({ url, page, onTotalPages }) {
@@ -16,10 +18,10 @@ function PdfViewer({ url, page, onTotalPages }) {
   const loadAndRender = useCallback(async (cancelledRef) => {
     try {
       setError(null);
-      let pdf = pdfRef.current || pdfCache[url];
+      let pdf = pdfRef.current;
       if (!pdf) {
-        pdf = await pdfjs.getDocument({ url, withCredentials: false }).promise;
-        pdfCache[url] = pdf;
+        pdfCache[url] ||= pdfjs.getDocument({ url, withCredentials: false }).promise;
+        pdf = await pdfCache[url];
         pdfRef.current = pdf;
       }
       if (cancelledRef?.current) return;
@@ -78,9 +80,21 @@ function PdfViewer({ url, page, onTotalPages }) {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const observer = new ResizeObserver(() => loadAndRender());
+
+    // Debounced: on slow devices (TV hardware) a single render can take long
+    // enough that the container settles into several resize entries while it
+    // runs — re-rendering on every one just widens the window for the
+    // cancel/render race instead of closing it.
+    let timeoutId = null;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => loadAndRender(), 200);
+    });
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      clearTimeout(timeoutId);
+      observer.disconnect();
+    };
   }, [loadAndRender]);
 
   if (error) {
