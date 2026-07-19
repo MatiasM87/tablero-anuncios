@@ -385,6 +385,27 @@ app.put('/api/settings', requireAuth, (req, res) => {
   res.json(db.settings);
 });
 
+// Validates a page's schedule ({ enabled, days, start, end, hideOutside }).
+// Returns null when the shape is invalid so a bad client can never persist a
+// schedule the display would choke on.
+function sanitizeSchedule(schedule) {
+  if (!schedule || typeof schedule !== 'object') return null;
+  const validTime = v => (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)) ? v : null;
+  const start = validTime(schedule.start);
+  const end = validTime(schedule.end);
+  const days = Array.isArray(schedule.days)
+    ? [...new Set(schedule.days.map(Number).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))].sort()
+    : [];
+  if (!start || !end) return null;
+  return {
+    enabled: Boolean(schedule.enabled),
+    days,
+    start,
+    end,
+    hideOutside: Boolean(schedule.hideOutside),
+  };
+}
+
 // GET /api/pages — ordered list of pages the board cycles through; each page
 // has its own layout template and per-zone document assignments
 app.get('/api/pages', (req, res) => {
@@ -422,6 +443,7 @@ app.put('/api/pages', requireAuth, (req, res) => {
       name: (page.name || '').trim() || `Página ${pageIndex + 1}`,
       template,
       zoneAssignments,
+      schedule: sanitizeSchedule(page.schedule),
     };
   });
 
