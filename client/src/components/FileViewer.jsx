@@ -49,12 +49,23 @@ function PdfViewer({ url, page, onTotalPages }) {
         renderTaskRef.current = null;
       }
 
-      canvas.width = scaledVp.width;
-      canvas.height = scaledVp.height;
+      // Render at higher density than the on-screen size for sharper text:
+      // at least the device pixel ratio, and a minimum of 2x so 1080p TVs
+      // (which report dpr 1) get a supersampled image the browser downscales.
+      // Capped at 3x to keep canvas memory reasonable on TV hardware.
+      const outputScale = Math.min(3, Math.max(window.devicePixelRatio || 1, 2));
+      canvas.width = Math.floor(scaledVp.width * outputScale);
+      canvas.height = Math.floor(scaledVp.height * outputScale);
+      canvas.style.width = `${Math.floor(scaledVp.width)}px`;
+      canvas.style.height = `${Math.floor(scaledVp.height)}px`;
 
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const task = pdfPage.render({ canvasContext: ctx, viewport: scaledVp });
+      const task = pdfPage.render({
+        canvasContext: ctx,
+        viewport: scaledVp,
+        transform: [outputScale, 0, 0, outputScale, 0, 0],
+      });
       renderTaskRef.current = task;
       await task.promise;
       if (renderTaskRef.current === task) renderTaskRef.current = null;

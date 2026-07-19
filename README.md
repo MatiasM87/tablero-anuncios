@@ -23,6 +23,14 @@ npm run dev            # levanta cliente (Vite) y servidor (nodemon) en paralelo
 - Cliente de desarrollo: http://localhost:5173
 - Panel de administración: `/admin`
 
+### Acceso al panel de administración
+
+`/admin` está protegido por clave. La clave predeterminada es **`admin123`**; al iniciar sesión por primera vez la aplicación obliga a elegir una clave nueva. La clave se puede volver a cambiar desde **Seguridad** en el panel, donde también se puede cerrar la sesión.
+
+### Título del tablero
+
+Desde **Título del tablero** en `/admin` se puede activar una barra de título en la parte superior de la pantalla principal, eligiendo texto, tipo de fuente, tamaño y colores (texto y barra). Si el título es más largo que la pantalla, se corta con «…».
+
 ## Producción con Docker
 
 El proyecto incluye un `Dockerfile` multi-stage (build del cliente + servidor Node) y un `docker-compose.yml` para levantarlo como contenedor.

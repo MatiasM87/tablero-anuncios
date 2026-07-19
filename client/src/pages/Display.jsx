@@ -1,6 +1,29 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import PageStage from '../components/PageStage.jsx';
 import { fetchItems, fetchSettings, fetchPages } from '../utils/api.js';
+import { getTitleFont, getTitleSize } from '../constants/title.js';
+
+// Full-width bar across the top of the board. Long titles are cut off with an
+// ellipsis instead of wrapping or shrinking the content area further.
+function TitleBar({ title }) {
+  return (
+    <header
+      className="w-full flex-shrink-0 flex items-center overflow-hidden px-[3vw]"
+      style={{ background: title.background || '#111827' }}
+    >
+      <h1
+        className="w-full text-center truncate whitespace-nowrap leading-tight py-[1vh] font-bold"
+        style={{
+          color: title.color || '#ffffff',
+          fontFamily: getTitleFont(title.font).css,
+          fontSize: getTitleSize(title.size).css,
+        }}
+      >
+        {title.text}
+      </h1>
+    </header>
+  );
+}
 
 function Clock() {
   const [time, setTime] = useState('');
@@ -90,31 +113,38 @@ export default function Display() {
   const page = pages[pageIndex];
   if (!page) return null;
 
+  const title = settings.title;
+  const showTitle = Boolean(title?.enabled && title.text?.trim());
+
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden relative select-none">
-      {/* Keyed by page id + visit count: only remounts (resetting every zone
-          back to its first document) when we deliberately move to another
-          page, never on the 30s background data refresh. */}
-      <PageStage
-        key={`${page.id}-${visit}`}
-        page={page}
-        items={items}
-        autoAdvance={settings.autoAdvance}
-        onPageComplete={handlePageComplete}
-      />
+    <div className="w-screen h-screen bg-black overflow-hidden select-none flex flex-col">
+      {showTitle && <TitleBar title={title} />}
 
-      {/* Global clock overlay */}
-      <div className="absolute top-3 left-3 z-20 bg-black/40 rounded-lg px-3 py-1.5">
-        <Clock />
+      <div className="relative flex-1 min-h-0">
+        {/* Keyed by page id + visit count: only remounts (resetting every zone
+            back to its first document) when we deliberately move to another
+            page, never on the 30s background data refresh. */}
+        <PageStage
+          key={`${page.id}-${visit}`}
+          page={page}
+          items={items}
+          autoAdvance={settings.autoAdvance}
+          onPageComplete={handlePageComplete}
+        />
+
+        {/* Global clock overlay */}
+        <div className="absolute top-3 left-3 z-20 bg-black/40 rounded-lg px-3 py-1.5">
+          <Clock />
+        </div>
+
+        {/* Admin shortcut — barely visible, hover to reveal */}
+        <a
+          href="/admin"
+          className="absolute top-3 right-3 z-20 opacity-0 hover:opacity-100 transition-opacity duration-300 text-white/60 hover:text-white bg-black/40 rounded-lg px-3 py-1.5 text-xs"
+        >
+          Admin
+        </a>
       </div>
-
-      {/* Admin shortcut — barely visible, hover to reveal */}
-      <a
-        href="/admin"
-        className="absolute top-3 right-3 z-20 opacity-0 hover:opacity-100 transition-opacity duration-300 text-white/60 hover:text-white bg-black/40 rounded-lg px-3 py-1.5 text-xs"
-      >
-        Admin
-      </a>
     </div>
   );
 }
