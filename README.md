@@ -31,6 +31,10 @@ npm run dev            # levanta cliente (Vite) y servidor (nodemon) en paralelo
 
 Desde **Título del tablero** en `/admin` se puede activar una barra de título en la parte superior de la pantalla principal, eligiendo texto, tipo de fuente, tamaño y colores (texto y barra). Si el título es más largo que la pantalla, se corta con «…».
 
+### Horario programado por página
+
+En `/admin/layout`, cada página puede tener un **horario programado** (días de la semana + hora de inicio y fin). Durante ese horario, el tablero muestra solo esa página, sin rotar a las demás; al terminar, vuelve la rotación normal. Opcionalmente se puede marcar que la página se muestre *solo* en su horario (fuera de él no participa de la rotación). Un rango con fin anterior al inicio (ej. 22:00 → 06:00) cruza la medianoche. Si dos páginas programadas coinciden, gana la primera de la lista.
+
 ## Producción con Docker
 
 El proyecto incluye un `Dockerfile` multi-stage (build del cliente + servidor Node) y un `docker-compose.yml` para levantarlo como contenedor.

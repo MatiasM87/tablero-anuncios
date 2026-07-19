@@ -1,8 +1,120 @@
 import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { GripVertical, Trash2, Monitor, ArrowLeft, Layers, Plus, CheckCircle2 } from 'lucide-react';
+import { GripVertical, Trash2, Monitor, ArrowLeft, Layers, Plus, CheckCircle2, CalendarClock } from 'lucide-react';
 import { fetchItems, fetchPages, updatePages } from '../utils/api.js';
 import { LAYOUT_TEMPLATES, getTemplate } from '../constants/layouts.js';
+import { DAY_LABELS } from '../utils/schedule.js';
+
+const DEFAULT_SCHEDULE = { enabled: false, days: [1, 2, 3, 4, 5], start: '08:00', end: '12:00', hideOutside: false };
+
+function SchedulePanel({ schedule, onChange }) {
+  const value = { ...DEFAULT_SCHEDULE, ...(schedule || {}) };
+  const patch = (data) => onChange({ ...value, ...data });
+
+  const toggleDay = (day) => {
+    const days = value.days.includes(day)
+      ? value.days.filter(d => d !== day)
+      : [...value.days, day].sort();
+    patch({ days });
+  };
+
+  const overnight = value.start && value.end && value.end <= value.start;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-medium text-gray-800 flex items-center gap-2">
+            <CalendarClock size={16} className="text-gray-400" /> Horario programado
+          </p>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Durante este horario el tablero muestra <span className="font-medium">solo esta página</span>, sin rotar a las demás
+          </p>
+        </div>
+        <button
+          onClick={() => patch({ enabled: !value.enabled })}
+          className={`relative inline-flex h-7 w-12 rounded-full transition-colors flex-shrink-0 ${
+            value.enabled ? 'bg-blue-600' : 'bg-gray-300'
+          }`}
+        >
+          <span className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+            value.enabled ? 'translate-x-6' : 'translate-x-1'
+          }`} />
+        </button>
+      </div>
+
+      {value.enabled && (
+        <div className="mt-4 space-y-4 border-t border-gray-100 pt-4">
+          {/* Days of week */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Días</label>
+            <div className="flex flex-wrap gap-2">
+              {DAY_LABELS.map((label, day) => (
+                <button
+                  key={day}
+                  onClick={() => toggleDay(day)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                    value.days.includes(day)
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {value.days.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">Elegí al menos un día para que el horario tenga efecto</p>
+            )}
+          </div>
+
+          {/* Time range */}
+          <div className="flex items-end gap-4 flex-wrap">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Desde</label>
+              <input
+                type="time"
+                value={value.start}
+                onChange={(e) => e.target.value && patch({ start: e.target.value })}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Hasta</label>
+              <input
+                type="time"
+                value={value.end}
+                onChange={(e) => e.target.value && patch({ end: e.target.value })}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            {overnight && (
+              <p className="text-xs text-gray-400 pb-2">Cruza la medianoche: termina al día siguiente</p>
+            )}
+          </div>
+
+          {/* Outside-window behavior */}
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={value.hideOutside}
+              onChange={(e) => patch({ hideOutside: e.target.checked })}
+              className="mt-0.5 accent-blue-600"
+            />
+            <span className="text-sm text-gray-600">
+              Mostrar esta página <span className="font-medium">solo en su horario</span>
+              <span className="block text-xs text-gray-400">Si no está tildado, fuera del horario la página participa de la rotación normal</span>
+            </span>
+          </label>
+
+          <p className="text-xs text-gray-400">
+            Si dos páginas programadas coinciden en horario, se muestra la primera de la lista.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function MiniPreview({ template }) {
   const cellIds = new Set(template.gridTemplateAreas.match(/[a-z]/g));
@@ -161,8 +273,18 @@ function PageListItem({ page, index, selected, onSelect, onRemove, canRemove, dr
       </div>
       <MiniPreview template={template} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 truncate">{page.name}</p>
-        <p className="text-xs text-gray-400">{template.label}</p>
+        <p className="text-sm font-medium text-gray-800 truncate flex items-center gap-1.5">
+          {page.name}
+          {page.schedule?.enabled && (
+            <CalendarClock size={13} className="text-blue-500 flex-shrink-0" title="Con horario programado" />
+          )}
+        </p>
+        <p className="text-xs text-gray-400">
+          {template.label}
+          {page.schedule?.enabled && (
+            <span className="text-blue-500"> · {page.schedule.start}–{page.schedule.end}</span>
+          )}
+        </p>
       </div>
       {canRemove && (
         <button
@@ -399,6 +521,12 @@ export default function AdminLayout() {
 
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Plantilla</h3>
               <TemplatePicker value={selectedPage.template} onChange={handleTemplateChange} />
+
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Programación</h3>
+              <SchedulePanel
+                schedule={selectedPage.schedule}
+                onChange={(schedule) => patchSelectedPage(p => ({ ...p, schedule }))}
+              />
 
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Contenido por zona</h3>
               {items.length === 0 ? (

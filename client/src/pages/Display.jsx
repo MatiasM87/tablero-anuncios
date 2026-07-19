@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import PageStage from '../components/PageStage.jsx';
 import { fetchItems, fetchSettings, fetchPages } from '../utils/api.js';
 import { getTitleFont, getTitleSize } from '../constants/title.js';
+import { isScheduleActive } from '../utils/schedule.js';
 
 // Full-width bar across the top of the board. Long titles are cut off with an
 // ellipsis instead of wrapping or shrinking the content area further.
@@ -46,9 +47,29 @@ export default function Display() {
   const [pageIndex, setPageIndex] = useState(0);
   const [visit, setVisit] = useState(0);
   const [loading, setLoading] = useState(true);
+  // Re-evaluated periodically so scheduled pages engage/release on time
+  // without waiting for the 30s data refresh.
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // A page inside its scheduled window takes over the whole board (first one
+  // in the list wins if several overlap). Outside of any window, the normal
+  // rotation runs — skipping pages marked "solo en su horario".
+  let visiblePages = pages;
+  const scheduledPage = pages.find(p => isScheduleActive(p.schedule, now));
+  if (scheduledPage) {
+    visiblePages = [scheduledPage];
+  } else {
+    visiblePages = pages.filter(p => !(p.schedule?.enabled && p.schedule.hideOutside));
+    if (visiblePages.length === 0) visiblePages = pages;
+  }
 
   const pagesRef = useRef([]);
-  pagesRef.current = pages;
+  pagesRef.current = visiblePages;
 
   useEffect(() => {
     const load = async () => {
@@ -68,10 +89,11 @@ export default function Display() {
     return () => clearInterval(id);
   }, []);
 
-  // Keep the current page in range if the page list shrinks server-side
+  // Keep the current page in range if the visible list shrinks (pages removed
+  // server-side, or a scheduled page taking over / releasing the board)
   useEffect(() => {
-    if (pageIndex >= pages.length && pages.length > 0) setPageIndex(0);
-  }, [pages.length, pageIndex]);
+    if (pageIndex >= visiblePages.length && visiblePages.length > 0) setPageIndex(0);
+  }, [visiblePages.length, pageIndex]);
 
   // Called once every zone on the current page has shown its whole queue at
   // least once. With a single page there's nowhere to advance to, so it just
@@ -110,7 +132,7 @@ export default function Display() {
     );
   }
 
-  const page = pages[pageIndex];
+  const page = visiblePages[pageIndex] || visiblePages[0];
   if (!page) return null;
 
   const title = settings.title;
