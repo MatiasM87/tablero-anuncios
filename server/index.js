@@ -3,6 +3,7 @@ const multer = require('multer');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const mammoth = require('mammoth');
 
@@ -19,11 +20,29 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 const DEFAULT_DB = {
   items: [],
-  settings: { autoAdvance: true, defaultDuration: 10 },
+  settings: {
+    autoAdvance: true,
+    defaultDuration: 10,
+    title: {
+      enabled: false,
+      text: '',
+      font: 'sans',
+      size: 'medium',
+      color: '#ffffff',
+      background: '#111827',
+    },
+  },
   pages: [
     { id: 'page-1', name: 'Página 1', template: 'single', zoneAssignments: [] },
   ],
 };
+
+const DEFAULT_PASSWORD = 'admin123';
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
+
+function hashPassword(password, salt) {
+  return crypto.scryptSync(String(password), salt, 64).toString('hex');
+}
 
 // Maps each layout template to its valid zone ids (used to validate assignments)
 const LAYOUT_TEMPLATES = {
@@ -56,6 +75,23 @@ function getDB() {
     delete db.zoneAssignments;
     saveDB(db);
   }
+  // Fill in settings added after the DB was created (e.g. the display title)
+  db.settings = {
+    ...DEFAULT_DB.settings,
+    ...db.settings,
+    title: { ...DEFAULT_DB.settings.title, ...(db.settings?.title || {}) },
+  };
+  // First run: create the default admin credential (must be changed on first login)
+  if (!db.auth) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    db.auth = {
+      salt,
+      passwordHash: hashPassword(DEFAULT_PASSWORD, salt),
+      mustChange: true,
+      tokens: [],
+    };
+    saveDB(db);
+  }
   return db;
 }
 
@@ -66,6 +102,78 @@ function saveDB(db) {
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
+
+function getRequestToken(req) {
+  const header = req.headers.authorization || '';
+  return header.startsWith('Bearer ') ? header.slice(7) : null;
+}
+
+function isValidToken(db, token) {
+  if (!token) return false;
+  const now = Date.now();
+  db.auth.tokens = db.auth.tokens.filter(t => now - t.createdAt < TOKEN_TTL_MS);
+  return db.auth.tokens.some(t => t.token === token);
+}
+
+// Protects every write endpoint. Reads stay open: the TV display needs
+// items/settings/pages without logging in.
+function requireAuth(req, res, next) {
+  const db = getDB();
+  if (!isValidToken(db, getRequestToken(req))) {
+    return res.status(401).json({ error: 'No autorizado. Iniciá sesión de nuevo.' });
+  }
+  next();
+}
+
+// POST /api/auth/login
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body || {};
+  const db = getDB();
+  if (!password || hashPassword(password, db.auth.salt) !== db.auth.passwordHash) {
+    return res.status(401).json({ error: 'Clave incorrecta' });
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  // Prune expired sessions and cap how many stay stored
+  db.auth.tokens = db.auth.tokens.filter(t => now - t.createdAt < TOKEN_TTL_MS).slice(-20);
+  db.auth.tokens.push({ token, createdAt: now });
+  saveDB(db);
+  res.json({ token, mustChange: db.auth.mustChange });
+});
+
+// GET /api/auth/check — is this token still a valid session?
+app.get('/api/auth/check', (req, res) => {
+  const db = getDB();
+  const ok = isValidToken(db, getRequestToken(req));
+  res.json({ ok, mustChange: ok ? db.auth.mustChange : false });
+});
+
+// POST /api/auth/password — change the admin password
+app.post('/api/auth/password', requireAuth, (req, res) => {
+  const { newPassword } = req.body || {};
+  if (!newPassword || String(newPassword).trim().length < 4) {
+    return res.status(400).json({ error: 'La clave debe tener al menos 4 caracteres' });
+  }
+  if (String(newPassword) === DEFAULT_PASSWORD) {
+    return res.status(400).json({ error: 'Elegí una clave distinta a la predeterminada' });
+  }
+  const db = getDB();
+  const salt = crypto.randomBytes(16).toString('hex');
+  db.auth.salt = salt;
+  db.auth.passwordHash = hashPassword(newPassword, salt);
+  db.auth.mustChange = false;
+  saveDB(db);
+  res.json({ ok: true });
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const db = getDB();
+  const token = getRequestToken(req);
+  db.auth.tokens = db.auth.tokens.filter(t => t.token !== token);
+  saveDB(db);
+  res.json({ ok: true });
+});
 
 
 const storage = multer.diskStorage({
@@ -131,7 +239,7 @@ app.get('/api/items', (req, res) => {
 });
 
 // POST /api/items — upload file
-app.post('/api/items', upload.single('file'), async (req, res) => {
+app.post('/api/items', requireAuth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se recibió ningún archivo' });
 
   const db = getDB();
@@ -170,7 +278,7 @@ app.post('/api/items', upload.single('file'), async (req, res) => {
 });
 
 // POST /api/items/url — add URL item (Google Docs, Slides, web pages)
-app.post('/api/items/url', (req, res) => {
+app.post('/api/items/url', requireAuth, (req, res) => {
   const { url, name, duration } = req.body;
   if (!url) return res.status(400).json({ error: 'URL requerida' });
 
@@ -204,7 +312,7 @@ app.post('/api/items/url', (req, res) => {
 });
 
 // PUT /api/items/reorder — drag & drop reorder
-app.put('/api/items/reorder', (req, res) => {
+app.put('/api/items/reorder', requireAuth, (req, res) => {
   const { orderedIds } = req.body;
   if (!Array.isArray(orderedIds)) return res.status(400).json({ error: 'orderedIds requerido' });
 
@@ -216,7 +324,7 @@ app.put('/api/items/reorder', (req, res) => {
 });
 
 // PUT /api/items/:id — update item properties
-app.put('/api/items/:id', (req, res) => {
+app.put('/api/items/:id', requireAuth, (req, res) => {
   const db = getDB();
   const idx = db.items.findIndex(i => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'No encontrado' });
@@ -232,7 +340,7 @@ app.put('/api/items/:id', (req, res) => {
 });
 
 // DELETE /api/items/:id
-app.delete('/api/items/:id', (req, res) => {
+app.delete('/api/items/:id', requireAuth, (req, res) => {
   const db = getDB();
   const item = db.items.find(i => i.id === req.params.id);
   if (!item) return res.status(404).json({ error: 'No encontrado' });
@@ -262,9 +370,17 @@ app.get('/api/settings', (req, res) => {
 });
 
 // PUT /api/settings
-app.put('/api/settings', (req, res) => {
+app.put('/api/settings', requireAuth, (req, res) => {
   const db = getDB();
-  db.settings = { ...db.settings, ...req.body };
+  const patch = { ...req.body };
+  if (patch.title) {
+    patch.title = {
+      ...db.settings.title,
+      ...patch.title,
+      text: String(patch.title.text ?? db.settings.title.text).slice(0, 120),
+    };
+  }
+  db.settings = { ...db.settings, ...patch };
   saveDB(db);
   res.json(db.settings);
 });
@@ -277,7 +393,7 @@ app.get('/api/pages', (req, res) => {
 });
 
 // PUT /api/pages — replace the full page list (add/remove/reorder/edit)
-app.put('/api/pages', (req, res) => {
+app.put('/api/pages', requireAuth, (req, res) => {
   const { pages } = req.body;
   if (!Array.isArray(pages) || pages.length === 0) {
     return res.status(400).json({ error: 'pages debe ser un array con al menos una página' });

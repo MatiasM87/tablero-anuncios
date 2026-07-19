@@ -1,9 +1,258 @@
 import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Plus, Settings, Monitor, Pin, Clock, RefreshCw, ChevronDown, ChevronUp, Layers } from 'lucide-react';
-import { fetchItems, fetchSettings, updateSettings, reorderItems } from '../utils/api.js';
+import { Plus, Settings, Monitor, Pin, Clock, RefreshCw, ChevronDown, ChevronUp, Layers, Type, Lock, LogOut } from 'lucide-react';
+import { fetchItems, fetchSettings, updateSettings, reorderItems, changePassword, logout } from '../utils/api.js';
 import ItemCard from '../components/ItemCard.jsx';
 import UploadModal from '../components/UploadModal.jsx';
+import { TITLE_FONTS, TITLE_SIZES, getTitleFont } from '../constants/title.js';
+
+const DEFAULT_TITLE = { enabled: false, text: '', font: 'sans', size: 'medium', color: '#ffffff', background: '#111827' };
+
+function TitlePanel({ settings, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState({ ...DEFAULT_TITLE, ...(settings.title || {}) });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setTitle({ ...DEFAULT_TITLE, ...(settings.title || {}) });
+  }, [settings.title]);
+
+  const patch = (data) => {
+    setTitle(prev => ({ ...prev, ...data }));
+    setSaved(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onChange({ title });
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2 text-gray-700 font-medium">
+          <Type size={18} className="text-gray-400" />
+          Título del tablero
+          {title.enabled && title.text.trim() && (
+            <span className="text-xs bg-green-50 text-green-600 border border-green-200 rounded-full px-2 py-0.5">Activo</span>
+          )}
+        </div>
+        {open ? <ChevronUp size={18} className="text-gray-400" /> : <ChevronDown size={18} className="text-gray-400" />}
+      </button>
+
+      {open && (
+        <div className="px-5 pb-5 space-y-5 border-t border-gray-100 pt-4">
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-gray-800">Mostrar título</p>
+              <p className="text-sm text-gray-400">Barra en la parte superior de la pantalla principal</p>
+            </div>
+            <button
+              onClick={() => patch({ enabled: !title.enabled })}
+              className={`relative inline-flex h-7 w-12 rounded-full transition-colors ${
+                title.enabled ? 'bg-blue-600' : 'bg-gray-300'
+              }`}
+            >
+              <span className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                title.enabled ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+
+          {/* Text */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Texto</label>
+            <input
+              type="text"
+              value={title.text}
+              maxLength={120}
+              onChange={(e) => patch({ text: e.target.value })}
+              placeholder="Ej: Novedades de la semana"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+            />
+            <p className="text-xs text-gray-400 mt-1">Si el título es muy largo, en pantalla se corta con «…»</p>
+          </div>
+
+          {/* Font + size */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de fuente</label>
+              <select
+                value={title.font}
+                onChange={(e) => patch({ font: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              >
+                {Object.entries(TITLE_FONTS).map(([id, f]) => (
+                  <option key={id} value={id}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tamaño</label>
+              <select
+                value={title.size}
+                onChange={(e) => patch({ size: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              >
+                {Object.entries(TITLE_SIZES).map(([id, s]) => (
+                  <option key={id} value={id}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Colors */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Color del texto</label>
+              <input
+                type="color"
+                value={title.color}
+                onChange={(e) => patch({ color: e.target.value })}
+                className="w-full h-10 border border-gray-200 rounded-lg cursor-pointer"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Color de la barra</label>
+              <input
+                type="color"
+                value={title.background}
+                onChange={(e) => patch({ background: e.target.value })}
+                className="w-full h-10 border border-gray-200 rounded-lg cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Vista previa</label>
+            <div
+              className="rounded-lg overflow-hidden px-4 py-3"
+              style={{ background: title.background }}
+            >
+              <p
+                className="text-center truncate whitespace-nowrap font-bold"
+                style={{
+                  color: title.color,
+                  fontFamily: getTitleFont(title.font).css,
+                  fontSize: title.size === 'small' ? '1rem' : title.size === 'large' ? '1.8rem' : '1.35rem',
+                }}
+              >
+                {title.text.trim() || 'Título del tablero'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
+          >
+            {saving ? 'Guardando…' : saved ? 'Guardado ✓' : 'Guardar título'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SecurityPanel() {
+  const [open, setOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleChange = async () => {
+    if (newPassword.trim().length < 4) {
+      setError('La clave debe tener al menos 4 caracteres');
+      return;
+    }
+    if (newPassword !== confirm) {
+      setError('Las claves no coinciden');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await changePassword(newPassword);
+      setNewPassword('');
+      setConfirm('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setError(err.message || 'No se pudo cambiar la clave');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    window.location.reload();
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-6">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2 text-gray-700 font-medium">
+          <Lock size={18} className="text-gray-400" />
+          Seguridad
+        </div>
+        {open ? <ChevronUp size={18} className="text-gray-400" /> : <ChevronDown size={18} className="text-gray-400" />}
+      </button>
+
+      {open && (
+        <div className="px-5 pb-5 space-y-4 border-t border-gray-100 pt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => { setNewPassword(e.target.value); setError(''); }}
+              placeholder="Nueva clave"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+            />
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => { setConfirm(e.target.value); setError(''); }}
+              placeholder="Repetir clave"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+            />
+          </div>
+          {error && <p className="text-sm text-red-500">{error}</p>}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={handleChange}
+              disabled={saving || !newPassword || !confirm}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg disabled:opacity-40 hover:bg-blue-700 transition-colors"
+            >
+              {saving ? 'Guardando…' : saved ? 'Clave cambiada ✓' : 'Cambiar clave'}
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            >
+              <LogOut size={15} /> Cerrar sesión
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SettingsPanel({ settings, onChange }) {
   const [open, setOpen] = useState(false);
@@ -224,6 +473,8 @@ export default function Admin() {
 
         {/* Settings */}
         <SettingsPanel settings={settings} onChange={handleSettingsChange} />
+        <TitlePanel settings={settings} onChange={handleSettingsChange} />
+        <SecurityPanel />
 
         {/* Items list */}
         {loading ? (
